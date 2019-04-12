@@ -1,0 +1,58 @@
+#!/bin/sh -e
+
+info="Usage: `basename \"$0\"` [OPTION]... INTERFACE [SHELL_COMMAND]
+
+Run shell with isolated network, execute SHELL_COMMAND if present, interactive shell otherwise
+-d DNS ip address, assumed to be the same as gateway address if not present
+-g gateway ip address, will use interface default if not present
+-a host ip address with prefix length, will use interface default if not present
+-h this help"
+
+while getopts 'd:g:a:h' option; do
+    case "$option" in
+        d ) dns_address="$OPTARG";;
+        g ) gateway="$OPTARG";;
+        a ) ip_address="$OPTARG";;
+        h | * ) echo "$info"; exit 0;;
+    esac
+done
+shift $((OPTIND - 1))
+
+ns_interface="$1"
+if [ -z "$gateway" ]; then
+    gateway=`ip route show default dev $ns_interface | grep -oP 'default via \K[a-fA-F\d\.]+'`
+fi
+if [ -z "$dns_address" ]; then
+    dns_address=$gateway
+fi
+if [ -z "$ip_address" ]; then
+    ip_address=`ip addr show dev $ns_interface scope global | grep -oP 'inet6? \K[a-fA-F\d\.]+/\d+'`
+fi
+
+ns_name=`hexdump -n 4 -e '"%x" 2 "\n"' /dev/urandom`
+pid_file=`mktemp`
+
+cleanup()
+{
+    set +e
+    echo Cleaning up netns $ns_name... >&2
+    sudo ip netns exec $ns_name kill -s SIGTERM "`cat $pid_file`"
+    sudo ip netns delete $ns_name
+}
+trap "cleanup; trap - EXIT; exit 0" EXIT INT
+
+sudo ip netns add $ns_name
+sudo ip link set dev $ns_interface netns $ns_name
+sudo ip netns exec $ns_name ip addr add $ip_address dev $ns_interface
+sudo ip netns exec $ns_name dnsmasq --no-resolv --server=$dns_address --dhcp-authoritative --pid-file="$pid_file"
+sudo ip netns exec $ns_name ip link set $ns_interface up
+sudo ip netns exec $ns_name ip link set lo up
+sudo ip netns exec $ns_name ip route add default via $gateway
+echo "Now operating in isolated network namespace $ns_name on $ns_interface interface. IP address: $ip_address, gateway: $gateway."
+
+if [ $# -gt 1 ]; then
+    shift
+    echo $@ | sudo ip netns exec $ns_name su "`id -u -n`"
+else
+    sudo ip netns exec $ns_name su "`id -u -n`"
+fi
