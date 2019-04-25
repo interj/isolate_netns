@@ -20,13 +20,13 @@ shift $((OPTIND - 1))
 
 ns_interface="$1"
 if [ -z "$gateway" ]; then
-    gateway=`ip route show default dev $ns_interface | grep -oP 'default via \K[a-fA-F\d\.]+'`
+    gateway=`ip route show default dev $ns_interface | grep -oP 'default via \K[a-fA-F\d\.\:]+'`
 fi
 if [ -z "$dns_address" ]; then
     dns_address=$gateway
 fi
 if [ -z "$ip_address" ]; then
-    ip_address=`ip addr show dev $ns_interface scope global | grep -oP 'inet6? \K[a-fA-F\d\.]+/\d+'`
+    ip_address=`ip addr show dev $ns_interface scope global | grep -oP 'inet6? \K[a-fA-F\d\.\:]+/\d+'`
 fi
 
 ns_name=`hexdump -n 4 -e '"%x" 2 "\n"' /dev/urandom`
